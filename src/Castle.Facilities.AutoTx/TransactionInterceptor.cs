@@ -14,161 +14,178 @@
 
 namespace Castle.Facilities.AutoTx
 {
-	using System;
-	using System.Reflection;
+    using System;
+    using System.Reflection;
 
-	using Castle.Core;
-	using Castle.Core.Interceptor;
-	using Castle.Core.Logging;
-	using Castle.DynamicProxy;
-	using Castle.MicroKernel;
+    using Castle.Core;
+    using Castle.Core.Interceptor;
+    using Castle.Core.Logging;
+    using Castle.DynamicProxy;
+    using Castle.MicroKernel;
 
-	using Castle.Services.Transaction;
+    using Castle.Services.Transaction;
 
-	/// <summary>
-	/// Intercepts call for transactional components, coordinating
-	/// the transaction creation, commit/rollback accordingly to the 
-	/// method execution. Rollback is invoked if an exception is threw.
-	/// </summary>
-	[Transient]
-	public class TransactionInterceptor : IInterceptor, IOnBehalfAware
-	{
-		private readonly IKernel kernel;
-		private readonly TransactionMetaInfoStore infoStore;
-		private TransactionMetaInfo metaInfo;
-		private ILogger logger = NullLogger.Instance;
+    /// <summary>
+    /// Intercepts call for transactional components, coordinating
+    /// the transaction creation, commit/rollback accordingly to the 
+    /// method execution. Rollback is invoked if an exception is threw.
+    /// </summary>
+    [Transient]
+    public class TransactionInterceptor : IInterceptor, IOnBehalfAware
+    {
+        private readonly IKernel kernel;
+        private readonly TransactionMetaInfoStore infoStore;
+        private TransactionMetaInfo metaInfo;
+        private ILogger logger = NullLogger.Instance;
 
-		/// <summary>
-		/// Initializes a new instance of the <see cref="TransactionInterceptor"/> class.
-		/// </summary>
-		/// <param name="kernel">The kernel.</param>
-		/// <param name="infoStore">The info store.</param>
-		public TransactionInterceptor(IKernel kernel, TransactionMetaInfoStore infoStore)
-		{
+        /// <summary>
+        /// Initializes a new instance of the <see cref="TransactionInterceptor"/> class.
+        /// </summary>
+        /// <param name="kernel">The kernel.</param>
+        /// <param name="infoStore">The info store.</param>
+        public TransactionInterceptor(IKernel kernel, TransactionMetaInfoStore infoStore)
+        {
             this.kernel = kernel;
-			this.infoStore = infoStore;
-		}
+            this.infoStore = infoStore;
+        }
 
-		/// <summary>
-		/// Gets or sets the logger.
-		/// </summary>
-		/// <value>The logger.</value>
-		public ILogger Logger
-		{
-			get { return logger; }
-			set { logger = value; }
-		}
+        /// <summary>
+        /// Gets or sets the logger.
+        /// </summary>
+        /// <value>The logger.</value>
+        public ILogger Logger
+        {
+            get { return logger; }
+            set { logger = value; }
+        }
 
-		#region IOnBehalfAware
+        #region IOnBehalfAware
 
-		/// <summary>
-		/// Sets the intercepted component's ComponentModel.
-		/// </summary>
-		/// <param name="target">The target's ComponentModel</param>
-		public void SetInterceptedComponentModel(ComponentModel target)
-		{
-			metaInfo = infoStore.GetMetaFor(target.Implementation);
-		}
+        /// <summary>
+        /// Sets the intercepted component's ComponentModel.
+        /// </summary>
+        /// <param name="target">The target's ComponentModel</param>
+        public void SetInterceptedComponentModel(ComponentModel target)
+        {
+            metaInfo = infoStore.GetMetaFor(target.Implementation);
+        }
 
-		#endregion
+        #endregion
 
-		/// <summary>
-		/// Intercepts the specified invocation and creates a transaction
-		/// if necessary.
-		/// </summary>
-		/// <param name="invocation">The invocation.</param>
-		/// <returns></returns>
-		public void Intercept(IInvocation invocation)
-		{
-			MethodInfo methodInfo;
-			if (invocation.Method.DeclaringType.IsInterface)
-				methodInfo = invocation.MethodInvocationTarget;
-			else
-				methodInfo = invocation.Method;
+        /// <summary>
+        /// Intercepts the specified invocation and creates a transaction
+        /// if necessary.
+        /// </summary>
+        /// <param name="invocation">The invocation.</param>
+        /// <returns></returns>
+        public void Intercept(IInvocation invocation)
+        {
+            MethodInfo methodInfo;
+            if (invocation.Method.DeclaringType.IsInterface)
+                methodInfo = invocation.MethodInvocationTarget;
+            else
+                methodInfo = invocation.Method;
 
-			if (metaInfo == null || !metaInfo.Contains(methodInfo))
-			{
-				invocation.Proceed();
-				return;
-			}
-			else
-			{
-				TransactionAttribute transactionAtt = metaInfo.GetTransactionAttributeFor(methodInfo);
+            if (metaInfo == null || !metaInfo.Contains(methodInfo))
+            {
+                invocation.Proceed();
+                return;
+            }
+            else
+            {
+                TransactionAttribute transactionAtt = metaInfo.GetTransactionAttributeFor(methodInfo);
 
-				ITransactionManager manager = (ITransactionManager) kernel[ typeof(ITransactionManager) ];
+                ITransactionManager manager = (ITransactionManager)kernel[typeof(ITransactionManager)];
 
-				ITransaction transaction = manager.CreateTransaction(
-					transactionAtt.TransactionMode, transactionAtt.IsolationMode, transactionAtt.Distributed);
+                ITransaction transaction = manager.CreateTransaction(
+                    transactionAtt.TransactionMode, transactionAtt.IsolationMode, transactionAtt.Distributed);
 
-				if (transaction == null)
-				{
-					invocation.Proceed();
-					return;
-				}
+                if (transaction == null)
+                {
+                    invocation.Proceed();
+                    return;
+                }
 
-				transaction.Begin();
+                transaction.Begin();
 
-				bool rolledback = false;
+                bool rolledback = false;
 
-				try
-				{
-					if (metaInfo.ShouldInject(methodInfo))
-					{
-						var parameters = methodInfo.GetParameters();
+                try
+                {
+                    if (metaInfo.ShouldInject(methodInfo))
+                    {
+                        var parameters = methodInfo.GetParameters();
 
-						for (int i = 0; i < parameters.Length; i++)
-						{
-							if (parameters[i].ParameterType == typeof(ITransaction))
-							{
-								invocation.SetArgumentValue(i, transaction);
-							}
-						}
-					}
-					invocation.Proceed();
+                        for (int i = 0; i < parameters.Length; i++)
+                        {
+                            if (parameters[i].ParameterType == typeof(ITransaction))
+                            {
+                                invocation.SetArgumentValue(i, transaction);
+                            }
+                        }
+                    }
+                    invocation.Proceed();
 
-					if (transaction.IsRollbackOnlySet)
-					{
-						logger.DebugFormat("Rolling back transaction {0}", transaction.GetHashCode());
+                    if (transaction.IsRollbackOnlySet)
+                    {
+                        logger.DebugFormat("Rolling back transaction {0}", transaction.GetHashCode());
 
-						rolledback = true;
-						transaction.Rollback();
-					}
-					else
-					{
-						logger.DebugFormat("Committing transaction {0}", transaction.GetHashCode());
+                        rolledback = true;
+                        transaction.Rollback();
+                    }
+                    else
+                    {
+                        logger.DebugFormat("Committing transaction {0}", transaction.GetHashCode());
 
-						transaction.Commit();
-					}
-				}
-				catch(TransactionException ex)
-				{
-					// Whoops. Special case, let's throw without 
-					// attempt to rollback anything
+                        transaction.Commit();
+                    }
+                }
+                catch (TransactionException ex)
+                {
+                    // Whoops. Special case, let's throw without 
+                    // attempt to rollback anything
 
-					if (logger.IsFatalEnabled)
-					{
-						logger.Fatal("Fatal error during transaction processing", ex);
-					}
+                    if (logger.IsFatalEnabled)
+                    {
+                        logger.Fatal("Fatal error during transaction processing", ex);
+                    }
 
-					throw;
-				}
-				catch(Exception)
-				{
-					if (!rolledback)
-					{
-						if (logger.IsDebugEnabled)
-							logger.DebugFormat("Rolling back transaction {0} due to exception on method {2}.{1}", transaction.GetHashCode(), methodInfo.Name, methodInfo.DeclaringType.Name);
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    if (!rolledback)
+                    {
+                        if (logger.IsDebugEnabled)
+                            logger.DebugFormat(ex, "Rolling back transaction {0} due to exception on method {2}.{1}", transaction.GetHashCode(), methodInfo.Name, methodInfo.DeclaringType.Name);
 
-						transaction.Rollback();
-					}
+                        RollbackTransaction(transaction);
+                    }
 
-					throw;
-				}
-				finally
-				{
-					manager.Dispose(transaction); 
-				}
-			}
-		}
-	}
+                    throw;
+                }
+                finally
+                {
+                    manager.Dispose(transaction);
+                }
+            }
+        }
+
+        private void RollbackTransaction(ITransaction transaction)
+        {
+            try
+            {
+                transaction.Rollback();
+            }
+            catch (Exception e)
+            {
+                if (logger.IsFatalEnabled)
+                {
+                    logger.Fatal("Fatal error during transaction rollback", e);
+                }
+
+                throw;
+            }
+        }
+    }
 }
